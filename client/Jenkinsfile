@@ -1,0 +1,82 @@
+pipeline {
+    agent any
+    
+    environment {
+        IMAGE_NAME = "dsa-visualization"
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        REGISTRY_URL = "http://192.168.20.250:8081"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                git 'https://github.com/VivekKamble014/DSA-Visualization.git'
+            }
+        }
+
+        stage('Install & Build') {
+            steps {
+                dir('client') {
+                    sh 'npm install'
+                    sh 'npm run build'
+                }
+            }
+        }
+
+        stage('SonarQube Scan') {
+            steps {
+                script {
+                    withSonarQubeEnv('sonarqube.imcc.com') {
+                        sh """
+                        sonar-scanner \
+                        -Dsonar.projectKey=${IMAGE_NAME} \
+                        -Dsonar.sources=client/src \
+                        -Dsonar.host.url=http://sonarqube.imcc.com \
+                        -Dsonar.login=$SONAR_TOKEN
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                script {
+                    dir('client') {
+                        sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                        sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY_URL}/repository/docker-hosted/${IMAGE_NAME}:${IMAGE_TAG}"
+                    }
+                }
+            }
+        }
+
+        stage('Docker Push to Nexus') {
+            steps {
+                script {
+                    docker.withRegistry("${REGISTRY_URL}/repository/docker-hosted", "nexus-credentials") {
+                        sh "docker push ${REGISTRY_URL}/repository/docker-hosted/${IMAGE_NAME}:${IMAGE_TAG}"
+                    }
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                script {
+                    sh "docker stop dsa-visualizer-container || true"
+                    sh "docker rm dsa-visualizer-container || true"
+                    sh "docker run -d -p 80:80 --name dsa-visualizer-container ${REGISTRY_URL}/repository/docker-hosted/${IMAGE_NAME}:${IMAGE_TAG}"
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "🚀 Deployment Successful!"
+        }
+        failure {
+            echo "❌ Build Failed!"
+        }
+    }
+}
