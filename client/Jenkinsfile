@@ -1,20 +1,24 @@
 pipeline {
     agent any
-    
+
     environment {
         IMAGE_NAME = "dsa-visualization"
         IMAGE_TAG = "${env.BUILD_NUMBER}"
-        REGISTRY_URL = "http://192.168.20.250:8081"
+
+        // Nexus Private Docker Registry
+        REGISTRY_URL = "http://nexus.imcc.com:8089"
+        REGISTRY_REPO = "2401003" // Your uploaded hosted repo
     }
-    
+
     stages {
-        stage('Checkout') {
+
+        stage('Checkout Code') {
             steps {
                 git 'https://github.com/VivekKamble014/DSA-Visualization.git'
             }
         }
 
-        stage('Install & Build') {
+        stage('Install Dependencies & Build') {
             steps {
                 dir('client') {
                     sh 'npm install'
@@ -23,7 +27,7 @@ pipeline {
             }
         }
 
-        stage('SonarQube Scan') {
+        stage('SonarQube Code Scan') {
             steps {
                 script {
                     withSonarQubeEnv('sonarqube.imcc.com') {
@@ -39,33 +43,36 @@ pipeline {
             }
         }
 
-        stage('Docker Build') {
+        stage('Build Docker Image') {
             steps {
                 script {
                     dir('client') {
                         sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
-                        sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY_URL}/repository/docker-hosted/${IMAGE_NAME}:${IMAGE_TAG}"
+                        sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY_URL}/repository/${REGISTRY_REPO}/${IMAGE_NAME}:${IMAGE_TAG}"
                     }
                 }
             }
         }
 
-        stage('Docker Push to Nexus') {
+        stage('Push to Nexus Private Registry') {
             steps {
                 script {
-                    docker.withRegistry("${REGISTRY_URL}/repository/docker-hosted", "nexus-credentials") {
-                        sh "docker push ${REGISTRY_URL}/repository/docker-hosted/${IMAGE_NAME}:${IMAGE_TAG}"
+                    docker.withRegistry("${REGISTRY_URL}/repository/${REGISTRY_REPO}", "nexus-credentials") {
+                        sh "docker push ${REGISTRY_URL}/repository/${REGISTRY_REPO}/${IMAGE_NAME}:${IMAGE_TAG}"
                     }
                 }
             }
         }
 
-        stage('Deploy') {
+        stage('Deploy Container') {
             steps {
                 script {
-                    sh "docker stop dsa-visualizer-container || true"
-                    sh "docker rm dsa-visualizer-container || true"
-                    sh "docker run -d -p 80:80 --name dsa-visualizer-container ${REGISTRY_URL}/repository/docker-hosted/${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh """
+                    docker stop dsa-container || true
+                    docker rm dsa-container || true
+                    docker run -d -p 80:80 --name dsa-container \
+                    ${REGISTRY_URL}/repository/${REGISTRY_REPO}/${IMAGE_NAME}:${IMAGE_TAG}
+                    """
                 }
             }
         }
@@ -73,10 +80,10 @@ pipeline {
 
     post {
         success {
-            echo "🚀 Deployment Successful!"
+            echo "🚀 Deployment Successful at port 80!"
         }
         failure {
-            echo "❌ Build Failed!"
+            echo "❌ Pipeline Failed — Check logs!"
         }
     }
 }
