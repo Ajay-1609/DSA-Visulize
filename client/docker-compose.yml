@@ -1,9 +1,10 @@
 services:
   client:
+    container_name: dsa-visualization-client
     build:
       context: .
       dockerfile: Dockerfile
-    image: yourdockerhubusername/stack-overflow-clone-client:latest
+    image: dsa-visualization:latest
     ports:
-      - "80:80"
+      - "5173:80"   # Browser accesses port 5173 → maps to Nginx 80
     restart: unless-stopped
