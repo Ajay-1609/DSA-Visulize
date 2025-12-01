@@ -31,11 +31,6 @@ spec:
         }
     }
 
-    environment {
-        SONARQUBE = "IMCC-Sonar"     // MUST match Jenkins configured name
-        DOCKER_IMAGE = "dsa-client"
-    }
-
     stages {
 
         stage("CHECK") {
@@ -65,13 +60,13 @@ spec:
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
-                    withSonarQubeEnv("${SONARQUBE}") {
+                     withCredentials([string(credentialsId: 'sonar-token-2401003', variable: 'SONAR_TOKEN')]) {
                         sh '''
                             sonar-scanner \
-                              -Dsonar.projectKey=dsa-client \
-                              -Dsonar.sources=client/src \
-                              -Dsonar.host.url=http://sonarqube.imcc.com \
-                              -Dsonar.login=$SONARQUBE_AUTH_TOKEN
+                                -Dsonar.projectKey=2401003-DSAV \
+                                -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
+                                -Dsonar.login=$SONAR_TOKEN \
+                                -Dsonar.python.coverage.reportPaths=coverage.xml
                         '''
                     }
                 }
