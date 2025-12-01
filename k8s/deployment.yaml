@@ -1,28 +1,73 @@
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: dsa-visualization
-  namespace: "2401003"
+  labels:
+    app: dsa-visualization
+
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: dsa-visualization
+
   template:
     metadata:
       labels:
         app: dsa-visualization
+
     spec:
+      imagePullSecrets:
+        - name: nexus-secret
+
       containers:
         - name: dsa-visualization
           image: nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/2401003-project/dsa-visualization:latest
-          imagePullPolicy: Always
           ports:
             - containerPort: 80
           resources:
-            limits:
-              cpu: "250m"
-              memory: "256Mi"
             requests:
               cpu: "100m"
               memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dsa-visualization-service
+  labels:
+    app: dsa-visualization
+
+spec:
+  type: ClusterIP        # ✔ as you requested
+  selector:
+    app: dsa-visualization
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dsa-visualization-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: "/"
+
+spec:
+  rules:
+    - host: 2401003.imcc.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dsa-visualization-service
+                port:
+                  number: 80
