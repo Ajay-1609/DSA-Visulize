@@ -173,8 +173,6 @@ spec:
                                 echo "Applying Kubernetes Service..."
                                 kubectl apply -n ${NAMESPACE} -f service.yaml
 
-                                echo "Waiting for rollout..."
-                                kubectl rollout status deployment/dsa-visualization -n ${NAMESPACE} --timeout=60s
                             '''
                         }
                     }
