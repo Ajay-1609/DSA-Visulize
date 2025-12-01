@@ -1,81 +1,106 @@
 pipeline {
-  agent {
-    kubernetes {
-      yaml """
+    agent {
+        kubernetes {
+            yaml '''
 apiVersion: v1
 kind: Pod
 spec:
   containers:
-    - name: node
-      image: node:18
-      command:
-        - cat
-      tty: true
-    - name: docker
-      image: docker:dind
-      securityContext:
-        privileged: true
-      command:
-        - dockerd-entrypoint.sh
-      tty: true
-"""
-    }
-  }
 
-  environment {
-    SONARQUBE = 'IMCC-Sonar'
-    DOCKER_IMAGE = "my-react-app:${env.BUILD_NUMBER}"
-  }
+  - name: node
+    image: node:18
+    command: ["cat"]
+    tty: true
 
-  stages {
+  - name: sonar-scanner
+    image: sonarsource/sonar-scanner-cli
+    command: ["cat"]
+    tty: true
 
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
-    }
+  - name: dind
+    image: docker:dind
+    args:
+      - "--storage-driver=overlay2"
+    securityContext:
+      privileged: true
+    env:
+      - name: DOCKER_TLS_CERTDIR
+        value: ""
 
-    stage('Install & Build') {
-      steps {
-        container('node') {
-          dir('client') {
-            sh 'npm install'
-            sh 'npm run build'
-          }
+'''
         }
-      }
     }
 
-    stage('SonarQube Analysis') {
-      steps {
-        container('node') {
-          withSonarQubeEnv("${SONARQUBE}") {
-            sh """
-              sonar-scanner \
-                -Dsonar.projectKey=dsa-client \
-                -Dsonar.sources=client/src \
-                -Dsonar.host.url=http://sonarqube.imcc.com \
-                -Dsonar.login=${SONAR_TOKEN}
-            """
-          }
+    environment {
+        SONARQUBE = "IMCC-Sonar"     // MUST match Jenkins configured name
+        DOCKER_IMAGE = "dsa-client"
+    }
+
+    stages {
+
+        stage("CHECK") {
+            steps {
+                echo "DSA Visualization Pipeline Started"
+            }
         }
-      }
-    }
 
-    stage('Docker Build & Push') {
-      steps {
-        container('docker') {
-          dir('client') {
-            sh "docker build -t ${DOCKER_IMAGE} ."
-          }
+        /* FRONTEND INSTALL + BUILD */
+        stage('Install + Build Frontend') {
+            steps {
+                dir('client') {
+                    container('node') {
+                        sh '''
+                            echo "Installing npm dependencies..."
+                            npm install
+
+                            echo "Building Vite project..."
+                            npm run build
+                        '''
+                    }
+                }
+            }
         }
-      }
-    }
-  }
 
-  post {
-    always {
-      cleanWs()
+        /* SONARQUBE */
+        stage('SonarQube Analysis') {
+            steps {
+                container('sonar-scanner') {
+                    withSonarQubeEnv("${SONARQUBE}") {
+                        sh '''
+                            sonar-scanner \
+                              -Dsonar.projectKey=dsa-client \
+                              -Dsonar.sources=client/src \
+                              -Dsonar.host.url=http://sonarqube.imcc.com \
+                              -Dsonar.login=$SONARQUBE_AUTH_TOKEN
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Wait for Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        /* DOCKER BUILD */
+        stage("Build Docker Image") {
+            steps {
+                container("dind") {
+                    sh """
+                        docker build -t ${DOCKER_IMAGE}:latest client/
+                    """
+                }
+            }
+        }
     }
-  }
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
 }
