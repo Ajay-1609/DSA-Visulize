@@ -144,6 +144,20 @@ spec:
             }
         }
 
+        stage('Create Namespace if not exists') {
+    agent { label 'kubernetes' }
+    container('kubectl') {
+        steps {
+            script {
+                echo "Creating namespace 2401003 if it does not exist..."
+                sh """
+                kubectl get namespace 2401003 || kubectl create namespace 2401003
+                """
+            }
+        }
+    }
+}
+
         /* ============================
               6. K8s DEPLOY
         ============================== */
