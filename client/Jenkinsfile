@@ -17,38 +17,64 @@ spec:
     command: ["cat"]
     tty: true
 
+  - name: kubectl
+    image: bitnami/kubectl:latest
+    command: ["cat"]
+    tty: true
+    securityContext:
+      runAsUser: 0
+      readOnlyRootFilesystem: false
+    env:
+      - name: KUBECONFIG
+        value: /kube/config
+    volumeMounts:
+      - name: kubeconfig-secret
+        mountPath: /kube/config
+        subPath: kubeconfig
+
   - name: dind
     image: docker:dind
-    args:
-      - "--storage-driver=overlay2"
     securityContext:
       privileged: true
     env:
       - name: DOCKER_TLS_CERTDIR
         value: ""
+    volumeMounts:
+      - name: docker-config
+        mountPath: /etc/docker/daemon.json
+        subPath: daemon.json
+
+  volumes:
+    - name: docker-config
+      configMap:
+        name: docker-daemon-config
+
+    - name: kubeconfig-secret
+      secret:
+        secretName: kubeconfig-secret
 '''
         }
     }
 
     environment {
-        DOCKER_IMAGE = "dsa-client"    // your image name
+        PROJECT_KEY = "2401003-DSAV"
+        IMAGE_NAME = "dsa-visualization"
+        NAMESPACE = "2401003"
+        REGISTRY = "nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085"
+        REPO = "2401003-project"
     }
 
     stages {
 
-        stage("CHECK") {
-            steps {
-                echo "DSA Visualization Pipeline Started"
-            }
-        }
-
-        /* FRONTEND INSTALL + BUILD */
-        stage('Install + Build Frontend') {
+        /* ============================
+              1. FRONTEND BUILD
+        ============================== */
+        stage('Build Frontend') {
             steps {
                 dir('client') {
                     container('node') {
                         sh '''
-                            echo "Installing npm dependencies..."
+                            echo "Installing dependencies..."
                             npm install
 
                             echo "Building Vite project..."
@@ -59,42 +85,85 @@ spec:
             }
         }
 
-        /* SONARQUBE */
+        /* ============================
+             2. RUN TESTS (Optional)
+        ============================== */
+        stage('Run Tests') {
+            steps {
+                echo "No tests added. Skipping."
+            }
+        }
+
+        /* ============================
+             3. SONARQUBE ANALYSIS
+        ============================== */
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
-                    withSonarQubeEnv('IMCC-Sonar') {         // ⭐ REQUIRED ⭐
-                        withCredentials([
-                            string(credentialsId: 'sonar-token-2401003', variable: 'SONAR_TOKEN')
-                        ]) {
-                            sh '''
-                                sonar-scanner \
-                                    -Dsonar.projectKey=2401003-DSAV \
-                                    -Dsonar.sources=client/src \
-                                    -Dsonar.host.url=$SONAR_HOST_URL \
-                                    -Dsonar.token=$SONAR_TOKEN
-                            '''
-                        }
+                    withCredentials([string(credentialsId: 'sonar-token-2401003', variable: 'SONAR_TOKEN')]) {
+                        sh '''
+                            sonar-scanner \
+                                -Dsonar.projectKey=2401003-DSAV \
+                                -Dsonar.sources=client/src \
+                                -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
+                                -Dsonar.login=$SONAR_TOKEN
+                        '''
                     }
                 }
             }
         }
 
-        stage('Wait for Quality Gate') {
+        /* ============================
+            4. LOGIN TO NEXUS DOCKER
+        ============================== */
+        stage('Login to Docker Registry') {
             steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true     // ⭐ NOW IT WORKS ⭐
+                container('dind') {
+                    sh '''
+                        docker --version
+                        sleep 10
+                        docker login $REGISTRY -u admin -p Changeme@2025
+                    '''
                 }
             }
         }
 
-        /* DOCKER BUILD */
-        stage("Build Docker Image") {
+        /* ============================
+            5. BUILD - TAG - PUSH IMAGE
+        ============================== */
+        stage('Build - Tag - Push Image') {
             steps {
-                container("dind") {
-                    sh """
-                        docker build -t ${DOCKER_IMAGE}:latest client/
-                    """
+                container('dind') {
+                    sh '''
+                        docker build -t ${IMAGE_NAME}:latest ./client
+                        docker tag ${IMAGE_NAME}:latest ${REGISTRY}/${REPO}/${IMAGE_NAME}:latest
+                        docker push ${REGISTRY}/${REPO}/${IMAGE_NAME}:latest
+                        docker image ls
+                    '''
+                }
+            }
+        }
+
+        /* ============================
+              6. K8s DEPLOY
+        ============================== */
+        stage('Deploy to Kubernetes') {
+            steps {
+                container('kubectl') {
+                    script {
+                        dir('k8s') {
+                            sh '''
+                                echo "Applying Kubernetes Deployment..."
+                                kubectl apply -n ${NAMESPACE} -f deployment.yaml
+
+                                echo "Applying Kubernetes Service..."
+                                kubectl apply -n ${NAMESPACE} -f service.yaml
+
+                                echo "Waiting for rollout..."
+                                kubectl rollout status deployment/dsa-visualization -n ${NAMESPACE} --timeout=60s
+                            '''
+                        }
+                    }
                 }
             }
         }
