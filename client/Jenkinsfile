@@ -1,13 +1,34 @@
 pipeline {
-  agent any
+  agent {
+    kubernetes {
+      yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - name: node
+      image: node:18
+      command:
+        - cat
+      tty: true
+    - name: docker
+      image: docker:dind
+      securityContext:
+        privileged: true
+      command:
+        - dockerd-entrypoint.sh
+      tty: true
+"""
+    }
+  }
 
   environment {
-    // Name of your SonarQube installation in Jenkins → configure in Manage Jenkins → Global Tool Configuration
-    SONARQUBE = 'IMCC-Sonar'  
+    SONARQUBE = 'IMCC-Sonar'
     DOCKER_IMAGE = "my-react-app:${env.BUILD_NUMBER}"
   }
 
   stages {
+
     stage('Checkout') {
       steps {
         checkout scm
@@ -16,43 +37,38 @@ pipeline {
 
     stage('Install & Build') {
       steps {
-        dir('client') {
-          sh 'npm ci'
-          sh 'npm run build'
+        container('node') {
+          dir('client') {
+            sh 'npm install'
+            sh 'npm run build'
+          }
         }
       }
     }
 
     stage('SonarQube Analysis') {
       steps {
-        withSonarQubeEnv("${SONARQUBE}") {
-          sh "sonar-scanner -Dsonar.projectKey=dsa-client -Dsonar.sources=client/src -Dsonar.host.url=http://sonarqube.imcc.com -Dsonar.login=${SONAR_TOKEN}"
-        }
-      }
-    }
-
-    stage('Wait for Quality Gate') {
-      steps {
-        timeout(time: 5, unit: 'MINUTES') {
-          waitForQualityGate abortPipeline: true
+        container('node') {
+          withSonarQubeEnv("${SONARQUBE}") {
+            sh """
+              sonar-scanner \
+                -Dsonar.projectKey=dsa-client \
+                -Dsonar.sources=client/src \
+                -Dsonar.host.url=http://sonarqube.imcc.com \
+                -Dsonar.login=${SONAR_TOKEN}
+            """
+          }
         }
       }
     }
 
     stage('Docker Build & Push') {
       steps {
-        dir('client') {
-          sh "docker build -t ${DOCKER_IMAGE} ."
+        container('docker') {
+          dir('client') {
+            sh "docker build -t ${DOCKER_IMAGE} ."
+          }
         }
-        // Optionally: push to a registry
-        // sh "docker push ${DOCKER_IMAGE}"
-      }
-    }
-
-    // Optional: deployment stage (if you deploy somewhere)
-    stage('Deploy') {
-      steps {
-        echo "Deploy stage — add your deploy commands here"
       }
     }
   }
