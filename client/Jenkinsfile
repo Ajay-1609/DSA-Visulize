@@ -26,9 +26,12 @@ spec:
     env:
       - name: DOCKER_TLS_CERTDIR
         value: ""
-
 '''
         }
+    }
+
+    environment {
+        DOCKER_IMAGE = "dsa-client"    // your image name
     }
 
     stages {
@@ -60,14 +63,18 @@ spec:
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
-                     withCredentials([string(credentialsId: 'sonar-token-2401003', variable: 'SONAR_TOKEN')]) {
-                        sh '''
-                            sonar-scanner \
-                                -Dsonar.projectKey=2401003-DSAV \
-                                -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
-                                -Dsonar.login=$SONAR_TOKEN \
-                                -Dsonar.python.coverage.reportPaths=coverage.xml
-                        '''
+                    withSonarQubeEnv('IMCC-Sonar') {         // ⭐ REQUIRED ⭐
+                        withCredentials([
+                            string(credentialsId: 'sonar-token-2401003', variable: 'SONAR_TOKEN')
+                        ]) {
+                            sh '''
+                                sonar-scanner \
+                                    -Dsonar.projectKey=2401003-DSAV \
+                                    -Dsonar.sources=client/src \
+                                    -Dsonar.host.url=$SONAR_HOST_URL \
+                                    -Dsonar.token=$SONAR_TOKEN
+                            '''
+                        }
                     }
                 }
             }
@@ -76,7 +83,7 @@ spec:
         stage('Wait for Quality Gate') {
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
+                    waitForQualityGate abortPipeline: true     // ⭐ NOW IT WORKS ⭐
                 }
             }
         }
