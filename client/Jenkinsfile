@@ -169,10 +169,7 @@ spec:
                             sh '''
                                 echo "Applying Kubernetes Deployment..."
                                 kubectl apply -n ${NAMESPACE} -f deployment.yaml
-
-                                echo "Applying Kubernetes Service..."
-                                kubectl apply -n ${NAMESPACE} -f service.yaml
-
+                               
                             '''
                         }
                     }
