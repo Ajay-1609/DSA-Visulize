@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: dsa-visualization
-  namespace: 2401003
+  namespace: "2401003"   # MUST BE A STRING
 spec:
   replicas: 1
   selector:
@@ -14,15 +14,20 @@ spec:
         app: dsa-visualization
     spec:
       containers:
-        - name: dsa-visualization
-          image: nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/2401003-project/dsa-visualization:latest
-          imagePullPolicy: Always
-          ports:
-            - containerPort: 80
-          resources:
-            limits:
-              cpu: "250m"
-              memory: "256Mi"
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
+      - name: dsa-visualization
+        image: nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085/2401003-project/dsa-visualization:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dsa-visualization-service
+  namespace: "2401003"   # MUST BE A STRING
+spec:
+  selector:
+    app: dsa-visualization
+  ports:
+  - port: 80
+    targetPort: 80
+  type: LoadBalancer
