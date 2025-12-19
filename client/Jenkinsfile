@@ -76,7 +76,8 @@ spec:
         ============================== */
         stage('Checkout Code') {
             steps {
-                checkout scm
+                git branch: 'main',
+                    url: 'https://github.com/Ajay-1609/DSA-Visulize.git'
             }
         }
 
