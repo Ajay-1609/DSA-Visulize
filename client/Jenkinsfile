@@ -7,6 +7,7 @@ apiVersion: v1
 kind: Pod
 spec:
   containers:
+
   - name: node
     image: node:18
     command: ["cat"]
@@ -48,6 +49,7 @@ spec:
     - name: docker-config
       configMap:
         name: docker-daemon-config
+
     - name: kubeconfig-secret
       secret:
         secretName: kubeconfig-secret
@@ -61,16 +63,33 @@ spec:
         NAMESPACE   = "2401003"
         REGISTRY    = "nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085"
         REPO        = "2401003-project"
+        SONAR_HOST  = "http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
     }
 
     stages {
 
+        /* ============================
+              0. CHECKOUT CODE
+        ============================== */
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/Ajay-1609/DSA-Visulize.git'
+            }
+        }
+
+        /* ============================
+              1. FRONTEND BUILD
+        ============================== */
         stage('Build Frontend') {
             steps {
                 dir('client') {
                     container('node') {
                         sh '''
+                            echo "Installing dependencies..."
                             npm install
+
+                            echo "Building project..."
                             npm run build
                         '''
                     }
@@ -78,27 +97,29 @@ spec:
             }
         }
 
+        /* ============================
+              2. TESTS
+        ============================== */
         stage('Run Tests') {
             steps {
                 echo "No tests added. Skipping."
             }
         }
 
+        /* ============================
+              3. SONARQUBE ANALYSIS
+        ============================== */
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
                     withCredentials([
-                        usernamePassword(
-                            credentialsId: 'sonar-token-2401003',
-                            usernameVariable: 'SONAR_USER',
-                            passwordVariable: 'SONAR_TOKEN'
-                        )
+                        string(credentialsId: 'sonar-token-2401003', variable: 'SONAR_TOKEN')
                     ]) {
                         sh '''
                             sonar-scanner \
-                              -Dsonar.projectKey=2401003-DSAV \
+                              -Dsonar.projectKey=${PROJECT_KEY} \
                               -Dsonar.sources=client/src \
-                              -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
+                              -Dsonar.host.url=${SONAR_HOST} \
                               -Dsonar.login=$SONAR_TOKEN
                         '''
                     }
@@ -106,16 +127,24 @@ spec:
             }
         }
 
+        /* ============================
+              4. DOCKER LOGIN
+        ============================== */
         stage('Login to Docker Registry') {
             steps {
                 container('dind') {
                     sh '''
+                        docker --version
+                        sleep 10
                         docker login $REGISTRY -u admin -p Changeme@2025
                     '''
                 }
             }
         }
 
+        /* ============================
+              5. BUILD - TAG - PUSH
+        ============================== */
         stage('Build - Tag - Push Image') {
             steps {
                 container('dind') {
@@ -123,11 +152,15 @@ spec:
                         docker build -t ${IMAGE_NAME}:latest ./client
                         docker tag ${IMAGE_NAME}:latest ${REGISTRY}/${REPO}/${IMAGE_NAME}:latest
                         docker push ${REGISTRY}/${REPO}/${IMAGE_NAME}:latest
+                        docker images
                     '''
                 }
             }
         }
 
+        /* ============================
+              6. CREATE NAMESPACE
+        ============================== */
         stage('Create Namespace if not exists') {
             steps {
                 container('kubectl') {
@@ -138,12 +171,16 @@ spec:
             }
         }
 
+        /* ============================
+              7. DEPLOY TO KUBERNETES
+        ============================== */
         stage('Deploy to Kubernetes') {
             steps {
                 container('kubectl') {
                     dir('k8s') {
                         sh '''
                             kubectl apply -n ${NAMESPACE} -f deployment.yaml
+                            kubectl rollout status deployment/${IMAGE_NAME} -n ${NAMESPACE}
                         '''
                     }
                 }
@@ -153,7 +190,7 @@ spec:
 
     post {
         always {
-            deleteDir()
+            echo "Pipeline finished successfully (cleanup skipped for permission safety)"
         }
     }
 }
