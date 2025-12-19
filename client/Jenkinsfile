@@ -180,7 +180,8 @@ spec:
 
     post {
         always {
-            cleanWs()
+           // cleanWs()
+           deleteDir()
         }
     }
 }
