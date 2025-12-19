@@ -1,9 +1,4 @@
 pipeline {
-
-    options {
-        skipDefaultCheckout(true)
-    }
-
     agent {
         kubernetes {
             yaml '''
@@ -11,12 +6,6 @@ apiVersion: v1
 kind: Pod
 spec:
   containers:
-
-  - name: node
-    image: node:18
-    command: ["cat"]
-    tty: true
-
   - name: sonar-scanner
     image: sonarsource/sonar-scanner-cli
     command: ["cat"]
@@ -30,172 +19,137 @@ spec:
       runAsUser: 0
       readOnlyRootFilesystem: false
     env:
-      - name: KUBECONFIG
-        value: /kube/config
+    - name: KUBECONFIG
+      value: /kube/config
     volumeMounts:
-      - name: kubeconfig-secret
-        mountPath: /kube/config
-        subPath: kubeconfig
+    - name: kubeconfig-secret
+      mountPath: /kube/config
+      subPath: kubeconfig
 
   - name: dind
     image: docker:dind
     securityContext:
       privileged: true
     env:
-      - name: DOCKER_TLS_CERTDIR
-        value: ""
+    - name: DOCKER_TLS_CERTDIR
+      value: ""
     volumeMounts:
-      - name: docker-config
-        mountPath: /etc/docker/daemon.json
-        subPath: daemon.json
+    - name: docker-config
+      mountPath: /etc/docker/daemon.json
+      subPath: daemon.json
 
   volumes:
-    - name: docker-config
-      configMap:
-        name: docker-daemon-config
-
-    - name: kubeconfig-secret
-      secret:
-        secretName: kubeconfig-secret
+  - name: docker-config
+    configMap:
+      name: docker-daemon-config
+  - name: kubeconfig-secret
+    secret:
+      secretName: kubeconfig-secret
 '''
         }
     }
 
     environment {
-        PROJECT_KEY = "2401003-DSAV"
-        IMAGE_NAME = "dsa-visualization"
-        NAMESPACE = "2401003"
-        REGISTRY = "nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085"
-        REPO = "2401003-project"
+        APP_NAME        = "dsa-visualization"
+        IMAGE_TAG       = "latest"
+        REGISTRY_URL    = "nexus-service-for-docker-hosted-registry.nexus.svc.cluster.local:8085"
+        REGISTRY_REPO   = "2401003-project"
+        SONAR_PROJECT   = "2401003-DSAV"
+        SONAR_HOST_URL  = "http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
+        NAMESPACE       = "2401003"
     }
 
     stages {
 
-        /* ============================
-              0. CHECKOUT CODE
-        ============================== */
-        stage('Checkout Code') {
+        stage('Build Docker Image') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/Ajay-1609/DSA-Visulize.git'
-            }
-        }
-
-        /* ============================
-              1. FRONTEND BUILD
-        ============================== */
-        stage('Build Frontend') {
-            steps {
-                dir('client') {
-                    container('node') {
+                // Checkout explicitly if needed or rely on default. 
+                // Previous file used manual checkout, but we will try standard first or keep manual if safe.
+                // Re-adding the checkout step for safety as previous file had it.
+                git branch: 'main', url: 'https://github.com/Ajay-1609/DSA-Visulize.git'
+                
+                container('dind') {
+                    dir('client') {
                         sh '''
-                            echo "Installing dependencies..."
-                            npm install
-
-                            echo "Building Vite project..."
-                            npm run build
+                            sleep 15
+                            docker build -t $APP_NAME:$IMAGE_TAG .
+                            docker images
                         '''
                     }
                 }
             }
         }
 
-        /* ============================
-             2. TESTS
-        ============================== */
-        stage('Run Tests') {
-            steps {
-                echo "No tests added. Skipping."
-            }
-        }
-
-        /* ============================
-             3. SONARQUBE
-        ============================== */
         stage('SonarQube Analysis') {
             steps {
                 container('sonar-scanner') {
-                    withCredentials([string(credentialsId: 'sonar-token-2401003', variable: 'SONAR_TOKEN')]) {
+                    withCredentials([
+                        string(credentialsId: 'sonar-taken-2401003', variable: 'SONAR_TOKEN')
+                    ]) {
                         sh '''
                             sonar-scanner \
-                                -Dsonar.projectKey=2401003-DSAV \
-                                -Dsonar.sources=client/src \
-                                -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
-                                -Dsonar.branch.name=main \
-                                -Dsonar.login=$SONAR_TOKEN
+                              -Dsonar.projectKey=$SONAR_PROJECT \
+                              -Dsonar.host.url=$SONAR_HOST_URL \
+                              -Dsonar.login=$SONAR_TOKEN \
+                              -Dsonar.sources=client/src \
+                              -Dsonar.branch.name=main
                         '''
                     }
                 }
             }
         }
 
-        /* ============================
-             4. DOCKER LOGIN
-        ============================== */
-        stage('Login to Docker Registry') {
+       stage('Login to Docker Registry') {
             steps {
                 container('dind') {
-                    sh '''
-                        docker --version
-                        sleep 10
-                        docker login $REGISTRY -u admin -p Changeme@2025
-                    '''
+                    sh 'docker --version'
+                    sh 'sleep 10'
+                    sh 'docker login $REGISTRY_URL -u admin -p Changeme@2025'
                 }
             }
         }
 
-        /* ============================
-             5. BUILD - TAG - PUSH
-        ============================== */
         stage('Build - Tag - Push Image') {
             steps {
                 container('dind') {
+                    // Tagging and pushing the built image. 
+                    // Note: image ID is local, we retag it.
                     sh '''
-                        docker build -t ${IMAGE_NAME}:latest ./client
-                        docker tag ${IMAGE_NAME}:latest ${REGISTRY}/${REPO}/${IMAGE_NAME}:latest
-                        docker push ${REGISTRY}/${REPO}/${IMAGE_NAME}:latest
-                        docker image ls
+                        docker tag $APP_NAME:$IMAGE_TAG \
+                          $REGISTRY_URL/$REGISTRY_REPO/$APP_NAME:$IMAGE_TAG
+
+                        docker push $REGISTRY_URL/$REGISTRY_REPO/$APP_NAME:$IMAGE_TAG
+                        
+                        # Verification
+                        docker images
                     '''
                 }
             }
         }
 
-        /* ============================
-              6. CREATE NAMESPACE
-        ============================== */
-        stage('Create Namespace if not exists') {
-            steps {
-                container('kubectl') {
-                    sh '''
-                        echo "Checking namespace..."
-                        kubectl get namespace ${NAMESPACE} || kubectl create namespace ${NAMESPACE}
-                    '''
-                }
-            }
-        }
-
-        /* ============================
-              7. DEPLOY TO K8s
-        ============================== */
-        stage('Deploy to Kubernetes') {
+        stage('Deploy Application') {
             steps {
                 container('kubectl') {
                     dir('k8s') {
                         sh '''
-                            echo "Applying Kubernetes Deployment..."
-                            kubectl apply -n ${NAMESPACE} -f deployment.yaml
+                            # Ensure namespace exists
+                            kubectl get namespace $NAMESPACE || kubectl create namespace $NAMESPACE
+                            
+                            # Apply deployment
+                            kubectl apply -f deployment.yaml -n $NAMESPACE
+                            
+                            # Check status
+                            kubectl rollout status deployment/$APP_NAME -n $NAMESPACE
                         '''
                     }
                 }
             }
         }
-        }
-
-
+    }
+    
     post {
         always {
-            deleteDir()
+                deleteDir()
         } 
     }
-
 }
