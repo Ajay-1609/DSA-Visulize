@@ -121,6 +121,7 @@ spec:
                                 -Dsonar.projectKey=2401003-DSAV \
                                 -Dsonar.sources=client/src \
                                 -Dsonar.host.url=http://my-sonarqube-sonarqube.sonarqube.svc.cluster.local:9000 \
+                                -Dsonar.branch.name=main \
                                 -Dsonar.login=$SONAR_TOKEN
                         '''
                     }
@@ -188,13 +189,16 @@ spec:
                 }
             }
         }
-    }
-}
-    post {
-    always {
-        node {
-            // CleanWs()
-            deleteDir()
         }
-    } 
-  }
+
+
+    post {
+        always {
+            node {
+                // CleanWs()
+                deleteDir()
+            }
+        } 
+    }
+
+}
