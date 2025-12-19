@@ -1,4 +1,9 @@
 pipeline {
+
+    options {
+        skipDefaultCheckout(true)
+    }
+
     agent {
         kubernetes {
             yaml '''
@@ -164,19 +169,17 @@ spec:
         stage('Deploy to Kubernetes') {
             steps {
                 container('kubectl') {
-                    script {
-                        dir('k8s') {
-                            sh '''
-                                echo "Applying Kubernetes Deployment..."
-                                kubectl apply -n ${NAMESPACE} -f deployment.yaml
-                               
-                            '''
-                        }
+                    dir('k8s') {
+                        sh '''
+                            echo "Applying Kubernetes Deployment..."
+                            kubectl apply -n ${NAMESPACE} -f deployment.yaml
+                        '''
                     }
                 }
             }
         }
     }
+}
 
     post {
     always {
@@ -184,5 +187,6 @@ spec:
             // CleanWs()
             deleteDir()
         }
-    }
+    } 
+  }
 }
