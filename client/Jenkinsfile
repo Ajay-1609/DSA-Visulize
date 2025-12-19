@@ -179,9 +179,10 @@ spec:
     }
 
     post {
-        always {
-           // cleanWs()
-           deleteDir()
+    always {
+        node {
+            // CleanWs()
+            deleteDir()
         }
     }
 }
