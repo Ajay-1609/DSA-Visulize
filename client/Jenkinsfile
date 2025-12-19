@@ -72,6 +72,15 @@ spec:
     stages {
 
         /* ============================
+              0. CHECKOUT CODE
+        ============================== */
+        stage('Checkout Code') {
+            steps {
+                checkout scm
+            }
+        }
+
+        /* ============================
               1. FRONTEND BUILD
         ============================== */
         stage('Build Frontend') {
